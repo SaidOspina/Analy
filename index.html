@@ -3,14 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analizador de Tendencias de Mercado</title>
+    <title>Datark 📊</title>
+    <link rel="icon" href="img/icono.ico" type="image/x-icon" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.emailjs.com/dist/email.min.js"></script>
+    <script>
+        (function(){
+            emailjs.init("HS31_ROk9R6BaeuAI"); // reemplaza con tu User ID
+        })();
+    </script>
+
 </head>
 <body>
     <header>
-        <h1>Analizador de Tendencias de Mercado</h1>
+        <h1>Datark 📊</h1>
         <p class="subtitle">Analiza datos, identifica patrones, descubre tendencias</p>
     </header>
     
@@ -62,6 +70,19 @@
         <div id="resultsSection" class="hidden">
             <div class="card">
                 <h2>Vista Previa de Datos</h2>
+                
+                <!-- Filtro de búsqueda -->
+                <div class="filter-container">
+                    <div class="input-group">
+                        <input type="text" id="searchInput" placeholder="Buscar datos...">
+                        <select id="filterColumn">
+                            <option value="all">Todas las columnas</option>
+                            <!-- Las opciones se cargarán dinámicamente -->
+                        </select>
+                        <button class="btn" id="searchBtn">Buscar</button>
+                    </div>
+                </div>
+
                 <div class="table-container">
                     <table id="dataTable">
                         <thead>
@@ -70,29 +91,27 @@
                         <tbody id="tableBody"></tbody>
                     </table>
                 </div>
+                
+                <!-- Controles de paginación -->
+                <div class="pagination-controls">
+                    <button class="btn-small" id="prevPage">Anterior</button>
+                    <span id="pageInfo">Página 1 de 1</span>
+                    <button class="btn-small" id="nextPage">Siguiente</button>
+                </div>
+            </div>
+            
+            <!-- Tablas de frecuencia -->
+            <div class="card">
+                <h2>Tablas de Frecuencia</h2>
+                <div id="frequencyTables">
+                    <!-- Las tablas de frecuencia se generarán dinámicamente -->
+                </div>
             </div>
             
             <div class="card">
                 <h2>Gráficos de Análisis</h2>
-                <div class="charts-container">
-                    <div class="chart-card">
-                        <h3>Distribución de Frecuencias</h3>
-                        <canvas id="frequencyChart"></canvas>
-                    </div>
-                    <div class="chart-card">
-                        <h3>Tendencia Temporal</h3>
-                        <canvas id="trendChart"></canvas>
-                    </div>
-                </div>
-                <div class="charts-container">
-                    <div class="chart-card">
-                        <h3>Valores por Categoría</h3>
-                        <canvas id="categoryChart"></canvas>
-                    </div>
-                    <div class="chart-card">
-                        <h3>Correlación de Variables</h3>
-                        <canvas id="correlationChart"></canvas>
-                    </div>
+                <div id="chartsContainer">
+                    <!-- Los gráficos se generarán dinámicamente -->
                 </div>
             </div>
             
@@ -100,13 +119,28 @@
                 <h2>Análisis de Resultados</h2>
                 <div class="analysis-content" id="analysisContent"></div>
                 <button class="btn" id="downloadBtn">Descargar Informe</button>
+                <button class="btn" id="sendEmailBtn">Enviar por Correo</button>
+                <form id="emailForm" class="hidden">
+                    <input type="hidden" name="to_email" value="agrupacionia2025@gmail.com">
+                    <textarea name="message" id="emailMessage"></textarea>
+                </form>
+                
             </div>
+        </div>
+    </div>
+    
+    <!-- Modal para ver detalles -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>Detalles del Registro</h2>
+            <div id="modalContent"></div>
         </div>
     </div>
     
     <footer>
         <p>© 2025 Analizador de Tendencias de Mercado | Todos los derechos reservados</p>
     </footer>
-    <script  src="app.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>

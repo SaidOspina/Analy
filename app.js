@@ -2,6 +2,9 @@
 let originalData = null;
 let processedData = null;
 let charts = {};
+let currentPage = 1;
+let rowsPerPage = 20;
+let filteredData = null;
 
 // Inicializar la aplicación
 document.addEventListener('DOMContentLoaded', function() {
@@ -12,6 +15,37 @@ document.addEventListener('DOMContentLoaded', function() {
     const manageProjectsBtn = document.getElementById('manageProjectsBtn');
     const projectsManager = document.getElementById('projectsManager');
     const saveProjectBtn = document.getElementById('saveProjectBtn');
+    const searchBtn = document.getElementById('searchBtn');
+    const prevPageBtn = document.getElementById('prevPage');
+    const nextPageBtn = document.getElementById('nextPage');
+
+    // Configurar paginación
+    prevPageBtn.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderTableData();
+        }
+    });
+
+    nextPageBtn.addEventListener('click', () => {
+        const totalPages = Math.ceil((filteredData || processedData).length / rowsPerPage);
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderTableData();
+        }
+    });
+
+    // Configurar búsqueda
+    searchBtn.addEventListener('click', filterData);
+
+    const searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault(); // Evita enviar formularios si los hay
+            filterData(); // Llama a la función de filtrar
+        }
+    });
+
 
     // Botón para mostrar/ocultar el gestor de proyectos
     manageProjectsBtn.addEventListener('click', function() {
@@ -28,7 +62,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const projectName = document.getElementById('projectName').value.trim();
         saveProject(projectName);
     });
-
+    
     // Eventos de arrastrar y soltar
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         dropArea.addEventListener(eventName, preventDefaults, false);
@@ -82,6 +116,34 @@ document.addEventListener('DOMContentLoaded', function() {
     downloadBtn.addEventListener('click', function() {
         downloadReport();
     });
+    const sendEmailBtn = document.getElementById('sendEmailBtn');
+    sendEmailBtn.addEventListener('click', () => {
+        const message = document.getElementById('analysisContent').innerText;
+        document.getElementById('emailMessage').value = message;
+
+        emailjs.sendForm('service_lbht95k', 'template_b6bvw1d', '#emailForm')
+            .then(() => {
+                alert('Informe enviado exitosamente a agrupacionia2025@gmail.com');
+            }, (error) => {
+                console.error('Error al enviar:', error);
+                alert('Error al enviar el informe por correo.');
+            });
+    });
+
+
+    // Configurar modal
+    const modal = document.getElementById('detailModal');
+    const closeButton = modal.querySelector('.close-button');
+    
+    closeButton.onclick = function() {
+        modal.style.display = 'none';
+    };
+    
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = 'none';
+        }
+    };
 });
 
 // Procesar archivo Excel
@@ -114,10 +176,15 @@ function processExcelFile(file) {
             };
         });
         
+        filteredData = null;
+        currentPage = 1;
+        
         // Actualizar UI
         setTimeout(() => {
+            populateFilterOptions();
             renderTableData();
-            createCharts();
+            createFrequencyTables();
+            createBarCharts();
             generateAnalysis();
             
             loadingSection.classList.add('hidden');
@@ -128,19 +195,80 @@ function processExcelFile(file) {
     reader.readAsArrayBuffer(file);
 }
 
-// Renderizar tabla
+// Poblar opciones del filtro
+function populateFilterOptions() {
+    if (!processedData || processedData.length === 0) return;
+    
+    const filterColumn = document.getElementById('filterColumn');
+    filterColumn.innerHTML = '<option value="all">Todas las columnas</option>';
+    
+    const headers = Object.keys(processedData[0]);
+    
+    headers.forEach(header => {
+        const option = document.createElement('option');
+        option.value = header;
+        option.textContent = header;
+        filterColumn.appendChild(option);
+    });
+}
+
+// Filtrar datos
+function filterData() {
+    if (!processedData || processedData.length === 0) return;
+    
+    const searchInput = document.getElementById('searchInput').value.toLowerCase();
+    const filterColumn = document.getElementById('filterColumn').value;
+    
+    if (!searchInput.trim()) {
+        filteredData = null;
+        currentPage = 1;
+        renderTableData();
+        return;
+    }
+    
+    if (filterColumn === 'all') {
+        filteredData = processedData.filter(row => {
+            return Object.values(row).some(value => 
+                String(value).toLowerCase().includes(searchInput)
+            );
+        });
+    } else {
+        filteredData = processedData.filter(row => 
+            String(row[filterColumn]).toLowerCase().includes(searchInput)
+        );
+    }
+    
+    currentPage = 1;
+    renderTableData();
+}
+
+// Renderizar tabla con paginación
 function renderTableData() {
     if (!processedData || processedData.length === 0) return;
     
     const tableHeader = document.getElementById('tableHeader');
     const tableBody = document.getElementById('tableBody');
+    const pageInfo = document.getElementById('pageInfo');
+    
+    // Usar datos filtrados o todos los datos
+    const dataToUse = filteredData || processedData;
+    
+    // Calcular páginas
+    const totalPages = Math.ceil(dataToUse.length / rowsPerPage);
+    
+    // Actualizar información de página
+    pageInfo.textContent = `Página ${currentPage} de ${totalPages}`;
+    
+    // Activar/desactivar botones de paginación
+    document.getElementById('prevPage').disabled = currentPage === 1;
+    document.getElementById('nextPage').disabled = currentPage === totalPages;
     
     // Limpiar tabla
     tableHeader.innerHTML = '';
     tableBody.innerHTML = '';
     
     // Obtener encabezados
-    const headers = Object.keys(processedData[0]);
+    const headers = Object.keys(dataToUse[0]);
     
     // Añadir encabezados
     headers.forEach(header => {
@@ -149,11 +277,14 @@ function renderTableData() {
         tableHeader.appendChild(th);
     });
     
-    // Añadir filas (limitadas a 10 para vista previa)
-    const previewData = processedData.slice(0, 10);
+    // Añadir filas (paginadas)
+    const startIndex = (currentPage - 1) * rowsPerPage;
+    const endIndex = Math.min(startIndex + rowsPerPage, dataToUse.length);
+    const pageData = dataToUse.slice(startIndex, endIndex);
     
-    previewData.forEach(row => {
+    pageData.forEach((row, index) => {
         const tr = document.createElement('tr');
+        tr.dataset.index = startIndex + index; // Guardar índice original
         
         headers.forEach(header => {
             const td = document.createElement('td');
@@ -161,12 +292,166 @@ function renderTableData() {
             tr.appendChild(td);
         });
         
+        // Añadir evento click para ver detalle
+        tr.addEventListener('click', function() {
+            showDetailModal(row);
+        });
+        
         tableBody.appendChild(tr);
     });
 }
 
-// Crear gráficos
-function createCharts() {
+// Mostrar modal con detalles del registro
+function showDetailModal(rowData) {
+    const modal = document.getElementById('detailModal');
+    const modalContent = document.getElementById('modalContent');
+    
+    // Limpiar contenido anterior
+    modalContent.innerHTML = '';
+    
+    // Crear tabla de detalle
+    const table = document.createElement('table');
+    table.className = 'detail-table';
+    
+    Object.entries(rowData).forEach(([key, value]) => {
+        const tr = document.createElement('tr');
+        
+        const thField = document.createElement('th');
+        thField.textContent = key;
+        tr.appendChild(thField);
+        
+        const tdValue = document.createElement('td');
+        tdValue.textContent = value;
+        tr.appendChild(tdValue);
+        
+        table.appendChild(tr);
+    });
+    
+    modalContent.appendChild(table);
+    modal.style.display = 'block';
+}
+
+// Crear tablas de frecuencia para columnas con valores repetidos
+function createFrequencyTables() {
+    if (!processedData || processedData.length === 0) return;
+    
+    const frequencyTablesContainer = document.getElementById('frequencyTables');
+    frequencyTablesContainer.innerHTML = '';
+    
+    const headers = Object.keys(processedData[0]).filter(h => h !== 'Código');
+    
+    headers.forEach(column => {
+        // Calcular frecuencias
+        const frequencies = {};
+        
+        processedData.forEach(row => {
+            const value = row[column];
+            frequencies[value] = (frequencies[value] || 0) + 1;
+        });
+        
+        // Verificar si hay valores repetidos
+        const hasRepeatedValues = Object.values(frequencies).some(freq => freq > 1);
+        
+        if (hasRepeatedValues) {
+            // Ordenar frecuencias de mayor a menor
+            const sortedFreqs = Object.entries(frequencies)
+                .sort((a, b) => b[1] - a[1])
+                .filter(([_, count]) => count > 1); // Solo mostrar valores que se repiten
+            
+            if (sortedFreqs.length === 0) return;
+            
+            // Crear contenedor para esta tabla de frecuencia
+            const freqItem = document.createElement('div');
+            freqItem.className = 'frequency-item';
+            
+            // Título
+            const title = document.createElement('h3');
+            title.textContent = `Frecuencia de ${column}`;
+            freqItem.appendChild(title);
+            
+            // Tabla
+            const table = document.createElement('table');
+            table.className = 'frequency-table';
+            
+            // Encabezados
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            
+            const thValue = document.createElement('th');
+            thValue.textContent = column;
+            headerRow.appendChild(thValue);
+            
+            const thFreq = document.createElement('th');
+            thFreq.textContent = 'Frecuencia';
+            headerRow.appendChild(thFreq);
+            
+            const thPercentage = document.createElement('th');
+            thPercentage.textContent = 'Porcentaje';
+            headerRow.appendChild(thPercentage);
+            
+            const thAction = document.createElement('th');
+            thAction.textContent = 'Acción';
+            headerRow.appendChild(thAction);
+            
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+            
+            // Cuerpo de la tabla
+            const tbody = document.createElement('tbody');
+            
+            sortedFreqs.forEach(([value, count]) => {
+                const tr = document.createElement('tr');
+                
+                const tdValue = document.createElement('td');
+                tdValue.textContent = value;
+                tr.appendChild(tdValue);
+                
+                const tdCount = document.createElement('td');
+                tdCount.textContent = count;
+                tr.appendChild(tdCount);
+                
+                const tdPercentage = document.createElement('td');
+                const percentage = (count / processedData.length * 100).toFixed(2);
+                tdPercentage.textContent = `${percentage}%`;
+                tr.appendChild(tdPercentage);
+                
+                const tdAction = document.createElement('td');
+                const seeMoreBtn = document.createElement('button');
+                seeMoreBtn.className = 'see-more-btn';
+                seeMoreBtn.textContent = 'Ver más';
+                seeMoreBtn.addEventListener('click', () => {
+                    // Filtrar registros con este valor
+                    // Establecer valores de búsqueda
+                    document.getElementById('searchInput').value = value;
+                    document.getElementById('filterColumn').value = column;
+                    
+                    // Aplicar filtro
+                    filterData();
+                    
+                    // Asegurar que la sección de resultados sea visible
+                    document.getElementById('resultsSection').classList.remove('hidden');
+                    
+                    // Desplazar la pantalla hacia la tabla de datos
+                    const dataTable = document.getElementById('dataTable');
+                    if (dataTable) {
+                        dataTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                });
+                tdAction.appendChild(seeMoreBtn);
+                tr.appendChild(tdAction);
+                
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(tbody);
+            freqItem.appendChild(table);
+            frequencyTablesContainer.appendChild(freqItem);
+        }
+    });
+}
+
+// Crear gráficos de barras para cada columna
+function createBarCharts() {
     if (!processedData || processedData.length === 0) return;
     
     // Destruir gráficos existentes
@@ -174,54 +459,80 @@ function createCharts() {
         if (chart) chart.destroy();
     });
     
-    // Datos para gráficos
+    charts = {}; // Reiniciar objeto de gráficos
+    
+    const chartsContainer = document.getElementById('chartsContainer');
+    chartsContainer.innerHTML = '';
+    
     const headers = Object.keys(processedData[0]).filter(h => h !== 'Código');
-    const numericColumns = headers.filter(header => 
-        processedData.every(row => !isNaN(parseFloat(row[header])))
-    );
     
-    // 1. Gráfico de frecuencias (elegimos la primera columna numérica)
-    if (numericColumns.length > 0) {
-        const targetColumn = numericColumns[0];
-        createFrequencyChart(targetColumn);
-    }
-    
-    // 2. Gráfico de tendencia temporal
-    createTrendChart(numericColumns);
-    
-    // 3. Gráfico por categorías (elegimos la primera columna no numérica)
-    const categoryColumns = headers.filter(h => !numericColumns.includes(h));
-    if (categoryColumns.length > 0) {
-        createCategoryChart(categoryColumns[0], numericColumns[0]);
-    }
-    
-    // 4. Gráfico de correlación (si hay al menos dos columnas numéricas)
-    if (numericColumns.length >= 2) {
-        createCorrelationChart(numericColumns[0], numericColumns[1]);
-    }
+    headers.forEach((column, index) => {
+        // Crear contenedor para este gráfico
+        const chartContainer = document.createElement('div');
+        chartContainer.className = 'chart-container';
+        
+        const chartTitle = document.createElement('h3');
+        chartTitle.textContent = `Gráfico de ${column}`;
+        chartContainer.appendChild(chartTitle);
+        
+        const canvas = document.createElement('canvas');
+        canvas.id = `chart_${index}`;
+        chartContainer.appendChild(canvas);
+        
+        chartsContainer.appendChild(chartContainer);
+        
+        // Determinar si es columna numérica o categórica
+        const isNumeric = processedData.every(row => !isNaN(parseFloat(row[column])));
+        
+        if (isNumeric) {
+            createNumericBarChart(canvas.id, column);
+        } else {
+            createCategoricalBarChart(canvas.id, column);
+        }
+    });
 }
 
-// Gráfico de frecuencias
-function createFrequencyChart(column) {
-    const ctx = document.getElementById('frequencyChart').getContext('2d');
+// Crear gráfico de barras para datos numéricos
+function createNumericBarChart(canvasId, column) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
     
-    // Crear distribución de frecuencias
+    // Agrupar valores numéricos en intervalos
     const values = processedData.map(row => parseFloat(row[column]));
-    const freqMap = {};
+    const min = Math.min(...values);
+    const max = Math.max(...values);
     
-    values.forEach(val => {
-        freqMap[val] = (freqMap[val] || 0) + 1;
+    // Determinar el número de intervalos (bins)
+    const binCount = Math.min(10, Math.ceil(Math.sqrt(values.length)));
+    const binSize = (max - min) / binCount;
+    
+    const bins = Array(binCount).fill(0);
+    const binLabels = [];
+    
+    // Crear etiquetas para los intervalos
+    for (let i = 0; i < binCount; i++) {
+        const start = min + i * binSize;
+        const end = min + (i + 1) * binSize;
+        binLabels.push(`${start.toFixed(2)} - ${end.toFixed(2)}`);
+    }
+    
+    // Contar valores en cada intervalo
+    values.forEach(value => {
+        if (value === max) {
+            // El valor máximo va en el último bin
+            bins[binCount - 1]++;
+        } else {
+            const binIndex = Math.floor((value - min) / binSize);
+            bins[binIndex]++;
+        }
     });
     
-    const sortedKeys = Object.keys(freqMap).sort((a, b) => parseFloat(a) - parseFloat(b));
-    
-    charts.frequency = new Chart(ctx, {
+    charts[canvasId] = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: sortedKeys,
+            labels: binLabels,
             datasets: [{
-                label: `Frecuencia de ${column}`,
-                data: sortedKeys.map(key => freqMap[key]),
+                label: `Distribución de ${column}`,
+                data: bins,
                 backgroundColor: 'rgba(67, 97, 238, 0.7)',
                 borderColor: 'rgba(67, 97, 238, 1)',
                 borderWidth: 1
@@ -250,6 +561,9 @@ function createFrequencyChart(column) {
                     title: {
                         display: true,
                         text: column
+                    },
+                    ticks: {
+                        display: false
                     }
                 }
             }
@@ -257,101 +571,33 @@ function createFrequencyChart(column) {
     });
 }
 
-// Gráfico de tendencia
-function createTrendChart(numericColumns) {
-    if (numericColumns.length === 0) return;
+// Crear gráfico de barras para datos categóricos
+function createCategoricalBarChart(canvasId, column) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
     
-    const ctx = document.getElementById('trendChart').getContext('2d');
-    const datasets = [];
-    
-    // Crear un dataset para cada columna numérica (máximo 3)
-    numericColumns.slice(0, 3).forEach((column, index) => {
-        const colors = [
-            { bg: 'rgba(67, 97, 238, 0.5)', border: 'rgba(67, 97, 238, 1)' },
-            { bg: 'rgba(76, 201, 240, 0.5)', border: 'rgba(76, 201, 240, 1)' },
-            { bg: 'rgba(247, 37, 133, 0.5)', border: 'rgba(247, 37, 133, 1)' }
-        ];
-        
-        datasets.push({
-            label: column,
-            data: processedData.map(row => parseFloat(row[column])),
-            backgroundColor: colors[index].bg,
-            borderColor: colors[index].border,
-            borderWidth: 2,
-            tension: 0.4,
-            fill: true
-        });
-    });
-    
-    charts.trend = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: processedData.map(row => row['Código']),
-            datasets: datasets
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    position: 'top',
-                },
-                title: {
-                    display: true,
-                    text: 'Tendencia de Valores'
-                }
-            },
-            scales: {
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Valor'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Código'
-                    }
-                }
-            }
-        }
-    });
-}
-
-// Gráfico por categoría
-function createCategoryChart(categoryColumn, valueColumn) {
-    if (!categoryColumn || !valueColumn) return;
-    
-    const ctx = document.getElementById('categoryChart').getContext('2d');
-    
-    // Agrupar por categoría
-    const categoryMap = {};
+    // Contar frecuencias por categoría
+    const freqMap = {};
     processedData.forEach(row => {
-        const category = row[categoryColumn];
-        const value = parseFloat(row[valueColumn]);
-        
-        if (!categoryMap[category]) {
-            categoryMap[category] = [];
-        }
-        
-        categoryMap[category].push(value);
+        const value = row[column];
+        freqMap[value] = (freqMap[value] || 0) + 1;
     });
     
-    // Calcular promedio por categoría
-    const categories = Object.keys(categoryMap);
-    const averages = categories.map(cat => {
-        const values = categoryMap[cat];
-        const sum = values.reduce((a, b) => a + b, 0);
-        return sum / values.length;
-    });
+    // Ordenar por frecuencia (de mayor a menor)
+    const sortedEntries = Object.entries(freqMap)
+        .sort((a, b) => b[1] - a[1]);
     
-    charts.category = new Chart(ctx, {
+    // Limitar a 15 categorías más frecuentes para mantener legibilidad
+    const topEntries = sortedEntries.slice(0, 15);
+    const labels = topEntries.map(entry => entry[0]);
+    const data = topEntries.map(entry => entry[1]);
+    
+    charts[canvasId] = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: categories,
+            labels: labels,
             datasets: [{
-                label: `Promedio de ${valueColumn} por ${categoryColumn}`,
-                data: averages,
+                label: `Frecuencia de ${column}`,
+                data: data,
                 backgroundColor: 'rgba(76, 201, 240, 0.7)',
                 borderColor: 'rgba(76, 201, 240, 1)',
                 borderWidth: 1
@@ -365,7 +611,7 @@ function createCategoryChart(categoryColumn, valueColumn) {
                 },
                 title: {
                     display: true,
-                    text: `${valueColumn} por ${categoryColumn}`
+                    text: `Categorías más frecuentes de ${column}`
                 }
             },
             scales: {
@@ -373,62 +619,16 @@ function createCategoryChart(categoryColumn, valueColumn) {
                     beginAtZero: true,
                     title: {
                         display: true,
-                        text: `Promedio de ${valueColumn}`
+                        text: 'Frecuencia'
                     }
                 },
                 x: {
                     title: {
                         display: true,
-                        text: categoryColumn
-                    }
-                }
-            }
-        }
-    });
-}
-
-// Gráfico de correlación
-function createCorrelationChart(column1, column2) {
-    if (!column1 || !column2) return;
-    
-    const ctx = document.getElementById('correlationChart').getContext('2d');
-    
-    const data = processedData.map(row => ({
-        x: parseFloat(row[column1]),
-        y: parseFloat(row[column2])
-    }));
-    
-    charts.correlation = new Chart(ctx, {
-        type: 'scatter',
-        data: {
-            datasets: [{
-                label: `${column1} vs ${column2}`,
-                data: data,
-                backgroundColor: 'rgba(247, 37, 133, 0.7)'
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    position: 'top',
-                },
-                title: {
-                    display: true,
-                    text: 'Análisis de Correlación'
-                }
-            },
-            scales: {
-                y: {
-                    title: {
-                        display: true,
-                        text: column2
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: column1
+                        text: column
+                    },
+                    ticks: {
+                        display: false
                     }
                 }
             }
@@ -457,7 +657,7 @@ function generateAnalysis() {
     // Análisis de valores repetidos
     const valueFrequencyMap = {};
     
-    numericColumns.forEach(column => {
+    headers.forEach(column => {
         valueFrequencyMap[column] = {};
         
         processedData.forEach(row => {
@@ -470,7 +670,7 @@ function generateAnalysis() {
     analysis += '<h3>Valores Más Frecuentes</h3>';
     analysis += '<ul>';
     
-    numericColumns.forEach(column => {
+    headers.forEach(column => {
         const freqMap = valueFrequencyMap[column];
         const sortedValues = Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]);
         
@@ -479,7 +679,16 @@ function generateAnalysis() {
             const frequency = freqMap[topValue];
             const percentage = ((frequency / processedData.length) * 100).toFixed(1);
             
-            analysis += `<li>El valor más común en <strong>${column}</strong> es <strong>${topValue}</strong>, apareciendo <strong>${frequency}</strong> veces (${percentage}% del total).</li>`;
+            // Añadir botón "Ver más" para cada valor más común
+            const recordIds = processedData
+                .filter(row => row[column] == topValue)
+                .map(row => row.Código);
+            
+            analysis += `<li>
+                El valor más común en <strong>${column}</strong> es <strong>${topValue}</strong>, 
+                apareciendo <strong>${frequency}</strong> veces (${percentage}% del total).
+                <button class="see-more-btn" onclick="showValueRecords('${column}', '${topValue}')">Ver más</button>
+            </li>`;
         }
     });
     
@@ -570,6 +779,25 @@ function generateAnalysis() {
     analysis += '</ul>';
     
     analysisContent.innerHTML = analysis;
+
+    // Añadir función global para manejar los botones "Ver más"
+    window.showValueRecords = function(column, value) {
+        // Establecer valores de búsqueda
+        document.getElementById('searchInput').value = value;
+        document.getElementById('filterColumn').value = column;
+        
+        // Aplicar filtro
+        filterData();
+        
+        // Asegurar que la sección de resultados sea visible
+        document.getElementById('resultsSection').classList.remove('hidden');
+        
+        // Desplazar la pantalla hacia la tabla de datos
+        const dataTable = document.getElementById('dataTable');
+        if (dataTable) {
+            dataTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    };
 }
 
 // Descargar reporte
@@ -590,7 +818,7 @@ function downloadReport() {
     
     // Descargar
     element.href = URL.createObjectURL(blob);
-    element.download = `analisis_tendencias_${new Date().toTime}.txt`;
+    element.download = `analisis_tendencias_${new Date().getTime()}.txt`;
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
@@ -630,7 +858,6 @@ function calculateCorrelation(array1, array2) {
     return num / den;
 }
 
-//Funciones para la base de datos
 
 // Inicializar la base de datos IndexedDB
 function initDB() {
@@ -659,6 +886,7 @@ function initDB() {
         };
     });
 }
+
 
 // Guardar proyecto actual
 async function saveProject(name) {
@@ -770,10 +998,14 @@ async function loadProject(id) {
                 // Restaurar datos
                 originalData = project.originalData;
                 processedData = project.processedData;
+                filteredData = null;
+                currentPage = 1;
                 
                 // Mostrar datos en la interfaz
+                populateFilterOptions();
                 renderTableData();
-                createCharts();
+                createFrequencyTables();
+                createBarCharts();
                 
                 // Restaurar análisis
                 document.getElementById('analysisContent').innerHTML = project.analysis;
@@ -781,6 +1013,9 @@ async function loadProject(id) {
                 // Mostrar sección de resultados
                 document.getElementById('loadingSection').classList.add('hidden');
                 document.getElementById('resultsSection').classList.remove('hidden');
+                
+                // Ocultar gestor de proyectos
+                document.getElementById('projectsManager').classList.add('hidden');
                 
                 alert('Proyecto cargado correctamente');
             }
