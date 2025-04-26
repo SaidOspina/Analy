@@ -1058,3 +1058,9 @@ async function deleteProject(id) {
         alert('Error al eliminar el proyecto');
     }
 }
+// Ocultar splash screen después de cargar
+setTimeout(() => {
+    const splash = document.getElementById('splashScreen');
+    splash.style.opacity = 0;
+    setTimeout(() => splash.style.display = 'none', 1000);
+}, 1500); // dura 1.5 segundos
