@@ -1,17 +1,39 @@
 :root {
     --primary: #4361ee;
     --secondary: #3f37c9;
-    --success: #4cc9f0;
+    --success: #4ccaf0c8;
     --dark: #212529;
     --light: #f8f9fa;
+
+    --bg-color: #f5f7fa;
+    --text-color: var(--dark);
+    --card-bg: rgba(255, 255, 255, 0.25);
+    --border-color: rgba(255, 255, 255, 0.18);
 }
+
+/* 🌒 Modo oscuro */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --primary: #4ccaf0c7;
+        --secondary: #4361ee;
+        --success: #3f37c9;
+        --dark: #f8f9fa;
+        --light: #212529;
+
+        --bg-color: #121212;
+        --text-color: #f1f1f1;
+        --card-bg: rgba(40, 40, 40, 0.35);
+        --border-color: rgba(255, 255, 255, 0.05);
+    }
+}
+
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #f5f7fa;
-    color: var(--dark);
+    background-color: var(--bg-color);
+    color: var(--text-color);
     line-height: 1.6;
 }
 
@@ -43,11 +65,11 @@ h1 {
 }
 
 .card, .upload-area, .chart-container, .analysis-section, .frequency-item {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--card-bg);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
     transition: all 0.3s ease;
 }
@@ -145,12 +167,12 @@ table tr {
 }
 
 table th {
-    background-color: #f2f2f2;
+    background-color: var(--bg-color);
     font-weight: 600;
 }
 
 table tr:hover {
-    background-color: #e0e7ff; /* un azul suave */
+    background-color: var(--bg-color);/* un azul suave */
     transform: scale(1.01);
 }
 
@@ -237,7 +259,7 @@ footer {
     margin-top: 2rem;
     color: #6c757d;
     font-size: 0.9rem;
-    background-color: #f8f9fa;
+    background-color: var(--bg-color);
     border-top: 1px solid #ddd;
     box-shadow: 0 -2px 6px rgba(0,0,0,0.05);
 }
@@ -264,7 +286,7 @@ footer {
     align-items: center;
     padding: 1rem;
     margin-bottom: 0.5rem;
-    background-color: #f9f9f9;
+    background-color: var(--bg-color);
     border-radius: 4px;
     border-left: 4px solid var(--primary);
 }
@@ -309,7 +331,7 @@ footer {
 }
 
 .frequency-table th {
-    background-color: #f2f2f2;
+    background-color: var(--bg-color);
     font-weight: 600;
 }
 
@@ -326,7 +348,7 @@ footer {
 }
 
 .modal-content {
-    background-color: white;
+    background-color: var(--bg-color);
     margin: 10% auto;
     padding: 2rem;
     border-radius: 8px;
@@ -361,13 +383,13 @@ footer {
 }
 
 .see-more-btn:hover {
-    background-color: #3731b3;
+    background-color: var(--primary);
     transform: translateY(-1px);
 }
 
 /* Estilos para las frecuencias */
 .frequency-item {
-    background-color: #f9f9f9;
+    background-color: var(--light);
     padding: 1rem;
     border-radius: 6px;
     margin-bottom: 1rem;
@@ -394,7 +416,7 @@ footer {
 }
 
 .frequency-table th {
-    background-color: #f2f2f2;
+    background-color: var(--bg-color);
     font-weight: 600;
 }
 
@@ -419,5 +441,51 @@ footer {
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@media (max-width: 768px) {
+    h1 {
+        font-size: 2rem;
+    }
+
+    .subtitle {
+        font-size: 1rem;
+    }
+
+    .upload-area {
+        padding: 1.5rem;
+    }
+
+    .input-group {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .projects-list {
+        padding: 0;
+    }
+
+    .project-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .chart-container {
+        padding: 1rem;
+    }
+
+    #chartsContainer {
+        grid-template-columns: 1fr;
+    }
+
+    table th, table td {
+        padding: 8px 10px;
+    }
+
+    .modal-content {
+        width: 90%;
+        margin-top: 20%;
     }
 }
