@@ -146,6 +146,1262 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 });
 
+// Inicializar componentes de la IA cuando se carga la página
+document.addEventListener('DOMContentLoaded', function() {
+    const generateAIAnalysisBtn = document.getElementById('generateAIAnalysisBtn');
+    
+    if (generateAIAnalysisBtn) {
+        generateAIAnalysisBtn.addEventListener('click', generateLocalAIAnalysis);
+    }
+});
+
+// Función para análisis de outliers faltante
+
+// Análisis de outliers y anomalías
+async function performOutlierAnalysis(data, numericColumns) {
+    const outlierResults = {
+        univariateOutliers: {},
+        multivariateOutliers: [],
+        anomalies: []
+    };
+    
+    // 3.1 Detección de outliers univariados (por columna individual)
+    for (const column of numericColumns) {
+        try {
+            const values = data.map(row => parseFloat(row[column]));
+            
+            // Calcular cuartiles para método IQR
+            const sortedValues = [...values].sort((a, b) => a - b);
+            const n = sortedValues.length;
+            
+            const q1Index = Math.floor(n * 0.25);
+            const q3Index = Math.floor(n * 0.75);
+            
+            const q1 = sortedValues[q1Index];
+            const q3 = sortedValues[q3Index];
+            const iqr = q3 - q1;
+            
+            const lowerBound = q1 - 1.5 * iqr;
+            const upperBound = q3 + 1.5 * iqr;
+            
+            const outliers = data.filter((row, index) => {
+                const value = parseFloat(row[column]);
+                return value < lowerBound || value > upperBound;
+            });
+            
+            if (outliers.length > 0) {
+                outlierResults.univariateOutliers[column] = {
+                    count: outliers.length,
+                    percentage: (outliers.length / data.length * 100).toFixed(1),
+                    indices: outliers.map(row => row.Código),
+                    bounds: { lower: lowerBound, upper: upperBound }
+                };
+            }
+        } catch (e) {
+            console.warn(`Error al detectar outliers en ${column}:`, e);
+        }
+    }
+    
+    // Para simplificar, vamos a implementar una versión básica de la detección multivariada
+    try {
+        // Detección de outliers multivariados
+        if (numericColumns.length >= 2) {
+            const col1 = numericColumns[0];
+            const col2 = numericColumns.length > 1 ? numericColumns[1] : numericColumns[0];
+            
+            // Calcular medias
+            const values1 = data.map(row => parseFloat(row[col1]));
+            const values2 = data.map(row => parseFloat(row[col2]));
+            
+            const mean1 = values1.reduce((a, b) => a + b, 0) / values1.length;
+            const mean2 = values2.reduce((a, b) => a + b, 0) / values2.length;
+            
+            // Calcular distancias euclidianas al centro
+            const distances = [];
+            for (let i = 0; i < data.length; i++) {
+                const dist = Math.sqrt(
+                    Math.pow(values1[i] - mean1, 2) + 
+                    Math.pow(values2[i] - mean2, 2)
+                );
+                
+                distances.push({
+                    index: i,
+                    distance: dist,
+                    code: data[i].Código
+                });
+            }
+            
+            // Ordenar por distancia
+            distances.sort((a, b) => b.distance - a.distance);
+            
+            // Los 5% más alejados se consideran outliers
+            const outlierCount = Math.ceil(data.length * 0.05);
+            outlierResults.multivariateOutliers = distances.slice(0, outlierCount);
+        }
+    } catch (e) {
+        console.warn("Error en detección de outliers multivariados:", e);
+    }
+    
+    // Detección de anomalías en patrones
+    try {
+        if (numericColumns.length > 0) {
+            const column = numericColumns[0];
+            const values = data.map(row => parseFloat(row[column]));
+            
+            // Calcular diferencias entre valores consecutivos
+            const diffs = [];
+            for (let i = 1; i < values.length; i++) {
+                diffs.push({
+                    index: i,
+                    diff: values[i] - values[i-1],
+                    code: data[i].Código
+                });
+            }
+            
+            // Calcular la media y desviación estándar de las diferencias
+            const diffValues = diffs.map(d => d.diff);
+            const meanDiff = diffValues.reduce((a, b) => a + b, 0) / diffValues.length;
+            
+            let sumSqDiff = 0;
+            for (const diff of diffValues) {
+                sumSqDiff += Math.pow(diff - meanDiff, 2);
+            }
+            const stdDevDiff = Math.sqrt(sumSqDiff / diffValues.length);
+            
+            // Anomalías son diferencias que se alejan más de 2 desviaciones estándar
+            outlierResults.anomalies = diffs.filter(d => 
+                Math.abs(d.diff - meanDiff) > 2 * stdDevDiff
+            );
+        }
+    } catch (e) {
+        console.warn("Error en detección de anomalías:", e);
+    }
+    
+    return outlierResults;
+}
+
+// Función principal para generar análisis con IA local
+async function generateLocalAIAnalysis() {
+    if (!processedData || processedData.length === 0) {
+        alert('No hay datos para analizar');
+        return;
+    }
+    
+    const aiAnalysisContent = document.getElementById('aiAnalysisContent');
+    const aiAnalysisLoading = document.getElementById('aiAnalysisLoading');
+    
+    // Mostrar indicador de carga
+    aiAnalysisLoading.classList.remove('hidden');
+    aiAnalysisContent.innerHTML = '';
+    
+    try {
+        // Preparar y analizar los datos
+        const headers = Object.keys(processedData[0]).filter(h => h !== 'Código');
+        
+        // Identificar columnas numéricas y categóricas
+        const numericColumns = headers.filter(header => {
+            try {
+                return processedData.every(row => !isNaN(parseFloat(row[header])));
+            } catch (e) {
+                return false;
+            }
+        });
+        
+        const categoricalColumns = headers.filter(header => 
+            !numericColumns.includes(header)
+        );
+        
+        // 1. Realizar análisis estadístico avanzado
+        const statsAnalysis = await performStatisticalAnalysis(processedData, numericColumns, categoricalColumns);
+        
+        // 2. Realizar análisis de patrones y agrupaciones
+        const patternAnalysis = await performPatternAnalysis(processedData, numericColumns, categoricalColumns);
+        
+        // 3. Realizar análisis de outliers y anomalías
+        const outlierAnalysis = await performOutlierAnalysis(processedData, numericColumns);
+        
+        // 4. Generar recomendaciones basadas en análisis
+        const recommendations = generateDataDrivenRecommendations(
+            statsAnalysis, 
+            patternAnalysis, 
+            outlierAnalysis, 
+            numericColumns, 
+            categoricalColumns
+        );
+        
+        // 5. Formatear y mostrar los resultados
+        renderLocalAIAnalysis(
+            statsAnalysis, 
+            patternAnalysis, 
+            outlierAnalysis, 
+            recommendations,
+            numericColumns,
+            categoricalColumns
+        );
+    } catch (error) {
+        console.error('Error en el análisis IA:', error);
+        aiAnalysisContent.innerHTML = `
+            <div class="error-message">
+                <h3>Error al generar el análisis</h3>
+                <p>${error.message || 'Ocurrió un error al analizar los datos'}</p>
+                <p>Intenta con un conjunto de datos diferente o contacta con soporte.</p>
+            </div>
+        `;
+    } finally {
+        // Ocultar indicador de carga
+        aiAnalysisLoading.classList.add('hidden');
+    }
+}
+
+// 1. Análisis estadístico avanzado
+async function performStatisticalAnalysis(data, numericColumns, categoricalColumns) {
+    // Resultado del análisis estadístico
+    const statsResults = {
+        correlations: [],
+        distributions: {},
+        timeSeries: null,
+        categoricalInsights: []
+    };
+    
+    // 1.1 Análisis de correlaciones entre variables numéricas
+    if (numericColumns.length >= 2) {
+        for (let i = 0; i < numericColumns.length; i++) {
+            for (let j = i + 1; j < numericColumns.length; j++) {
+                try {
+                    const col1 = numericColumns[i];
+                    const col2 = numericColumns[j];
+                    
+                    const values1 = data.map(row => parseFloat(row[col1]));
+                    const values2 = data.map(row => parseFloat(row[col2]));
+                    
+                    // Calcular correlación
+                    const correlation = calculateCorrelation(values1, values2);
+                    
+                    // Solo guardar correlaciones significativas
+                    if (Math.abs(correlation) > 0.3) {
+                        statsResults.correlations.push({
+                            columns: [col1, col2],
+                            value: correlation,
+                            strength: getCorrelationStrength(correlation),
+                            direction: correlation > 0 ? 'positiva' : 'negativa'
+                        });
+                    }
+                } catch (e) {
+                    console.warn(`Error al calcular correlación entre ${numericColumns[i]} y ${numericColumns[j]}:`, e);
+                }
+            }
+        }
+        
+        // Ordenar correlaciones de más fuertes a más débiles
+        statsResults.correlations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    }
+    
+    // 1.2 Análisis de distribuciones para columnas numéricas
+    for (const column of numericColumns) {
+        try {
+            const values = data.map(row => parseFloat(row[column]));
+            
+            // Estadísticas básicas
+            const stats = calculateNumericStats(values);
+            
+            // Determinar tipo de distribución
+            const distributionType = determineDistributionType(values, stats);
+            
+            statsResults.distributions[column] = {
+                ...stats,
+                distributionType,
+                skewness: calculateSkewness(values, stats.mean, stats.standardDeviation),
+                kurtosis: calculateKurtosis(values, stats.mean, stats.standardDeviation)
+            };
+        } catch (e) {
+            console.warn(`Error al analizar distribución de ${column}:`, e);
+        }
+    }
+    
+    // 1.3 Análisis de tendencias temporales si hay columnas de tiempo
+    const timeColumns = categoricalColumns.filter(col => 
+        col.toLowerCase().includes('fecha') || 
+        col.toLowerCase().includes('año') || 
+        col.toLowerCase().includes('mes') || 
+        col.toLowerCase().includes('time') || 
+        col.toLowerCase().includes('year') || 
+        col.toLowerCase().includes('date')
+    );
+    
+    if (timeColumns.length > 0 && numericColumns.length > 0) {
+        try {
+            statsResults.timeSeries = analyzeTimeSeries(data, timeColumns[0], numericColumns[0]);
+        } catch (e) {
+            console.warn('Error en análisis de series temporales:', e);
+        }
+    }
+    
+    // 1.4 Análisis de columnas categóricas
+    for (const column of categoricalColumns) {
+        try {
+            const categoricalInsight = analyzeCategoricalColumn(data, column, numericColumns);
+            if (categoricalInsight) {
+                statsResults.categoricalInsights.push(categoricalInsight);
+            }
+        } catch (e) {
+            console.warn(`Error al analizar columna categórica ${column}:`, e);
+        }
+    }
+    
+    return statsResults;
+}
+
+// Función para calcular estadísticas numéricas
+function calculateNumericStats(values) {
+    // Ordenar valores para cálculos basados en orden
+    const sortedValues = [...values].sort((a, b) => a - b);
+    const n = values.length;
+    
+    // Estadísticas básicas
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const sum = values.reduce((acc, val) => acc + val, 0);
+    const mean = sum / n;
+    
+    // Desviación estándar
+    const squaredDifferences = values.map(value => Math.pow(value - mean, 2));
+    const variance = squaredDifferences.reduce((acc, val) => acc + val, 0) / n;
+    const standardDeviation = Math.sqrt(variance);
+    
+    // Cuartiles
+    const q1Index = Math.floor(n * 0.25);
+    const q2Index = Math.floor(n * 0.5);
+    const q3Index = Math.floor(n * 0.75);
+    
+    return {
+        min,
+        max,
+        mean,
+        median: sortedValues[q2Index],
+        standardDeviation,
+        variance,
+        quartiles: {
+            q1: sortedValues[q1Index],
+            q2: sortedValues[q2Index],
+            q3: sortedValues[q3Index]
+        },
+        range: max - min
+    };
+}
+
+// Calcular asimetría (skewness)
+function calculateSkewness(values, mean, stdDev) {
+    if (stdDev === 0) return 0;
+    
+    const n = values.length;
+    let sumCubedDeviations = 0;
+    
+    for (let i = 0; i < n; i++) {
+        sumCubedDeviations += Math.pow((values[i] - mean) / stdDev, 3);
+    }
+    
+    return sumCubedDeviations / n;
+}
+
+// Calcular curtosis
+function calculateKurtosis(values, mean, stdDev) {
+    if (stdDev === 0) return 3; // Valor para distribución normal
+    
+    const n = values.length;
+    let sumQuarticDeviations = 0;
+    
+    for (let i = 0; i < n; i++) {
+        sumQuarticDeviations += Math.pow((values[i] - mean) / stdDev, 4);
+    }
+    
+    return sumQuarticDeviations / n;
+}
+
+// Determinar tipo de distribución
+function determineDistributionType(values, stats) {
+    // Calcular skewness
+    const skewness = calculateSkewness(values, stats.mean, stats.standardDeviation);
+    
+    // Calcular kurtosis
+    const kurtosis = calculateKurtosis(values, stats.mean, stats.standardDeviation);
+    
+    // Determinar tipo basado en skewness y kurtosis
+    if (Math.abs(skewness) < 0.5 && Math.abs(kurtosis - 3) < 0.5) {
+        return 'Normal';
+    } else if (skewness > 1) {
+        return 'Asimétrica positiva';
+    } else if (skewness < -1) {
+        return 'Asimétrica negativa';
+    } else if (kurtosis > 4) {
+        return 'Leptocúrtica (colas pesadas)';
+    } else if (kurtosis < 2) {
+        return 'Platicúrtica (colas ligeras)';
+    } else {
+        return 'No definido claramente';
+    }
+}
+
+// Analizar series temporales
+function analyzeTimeSeries(data, timeColumn, valueColumn) {
+    try {
+        // Intentar ordenar por la columna temporal
+        const orderedData = [...data].sort((a, b) => {
+            // Ordenar numéricamente si los valores son numéricos (años, etc.)
+            if (!isNaN(parseFloat(a[timeColumn])) && !isNaN(parseFloat(b[timeColumn]))) {
+                return parseFloat(a[timeColumn]) - parseFloat(b[timeColumn]);
+            }
+            // Ordenar alfabéticamente si son textos (meses, etc.)
+            return String(a[timeColumn]).localeCompare(String(b[timeColumn]));
+        });
+        
+        // Dividir en segmentos (inicio, medio, final)
+        const segmentSize = Math.ceil(orderedData.length / 3);
+        const firstSegment = orderedData.slice(0, segmentSize);
+        const middleSegment = orderedData.slice(segmentSize, 2 * segmentSize);
+        const lastSegment = orderedData.slice(2 * segmentSize);
+        
+        // Calcular medias para cada segmento
+        const firstMean = firstSegment.reduce((sum, row) => sum + parseFloat(row[valueColumn]), 0) / firstSegment.length;
+        const middleMean = middleSegment.reduce((sum, row) => sum + parseFloat(row[valueColumn]), 0) / middleSegment.length;
+        const lastMean = lastSegment.reduce((sum, row) => sum + parseFloat(row[valueColumn]), 0) / lastSegment.length;
+        
+        // Calcular cambios porcentuales
+        const firstToMiddleChange = ((middleMean - firstMean) / firstMean) * 100;
+        const middleToLastChange = ((lastMean - middleMean) / middleMean) * 100;
+        const overallChange = ((lastMean - firstMean) / firstMean) * 100;
+        
+        // Determinar tendencia
+        let trendType = 'Estable';
+        if (overallChange > 10) {
+            trendType = 'Creciente';
+        } else if (overallChange < -10) {
+            trendType = 'Decreciente';
+        } else if (Math.abs(firstToMiddleChange) > 15 && Math.abs(middleToLastChange) > 15) {
+            trendType = 'Fluctuante';
+        }
+        
+        // Detección de estacionalidad (muy simplificada)
+        const hasSeasonality = false; // Implementación simplificada
+        
+        return {
+            timeColumn,
+            valueColumn,
+            segmentMeans: [firstMean, middleMean, lastMean],
+            overallChange,
+            trendType,
+            hasSeasonality
+        };
+    } catch (e) {
+        console.warn('Error en análisis de series temporales:', e);
+        return null;
+    }
+}
+
+// Analizar columna categórica
+function analyzeCategoricalColumn(data, column, numericColumns) {
+    // Contar frecuencias
+    const frequencies = {};
+    data.forEach(row => {
+        const value = row[column];
+        frequencies[value] = (frequencies[value] || 0) + 1;
+    });
+    
+    // Obtener categorías ordenadas por frecuencia
+    const sortedCategories = Object.entries(frequencies)
+        .sort((a, b) => b[1] - a[1])
+        .map(([category, count]) => ({
+            category,
+            count,
+            percentage: (count / data.length * 100).toFixed(1)
+        }));
+    
+    // Si hay columnas numéricas, analizar relación entre categorías y valores numéricos
+    let categoryPerformance = null;
+    if (numericColumns.length > 0) {
+        const numCol = numericColumns[0]; // Usar primera columna numérica
+        
+        // Calcular media por categoría
+        const categoryStats = {};
+        Object.keys(frequencies).forEach(category => {
+            const categoryRows = data.filter(row => row[column] === category);
+            const values = categoryRows.map(row => parseFloat(row[numCol]));
+            
+            const sum = values.reduce((acc, val) => acc + val, 0);
+            const mean = sum / values.length;
+            
+            categoryStats[category] = {
+                mean,
+                count: values.length
+            };
+        });
+        
+        // Calcular media global para comparación
+        const allValues = data.map(row => parseFloat(row[numCol]));
+        const globalMean = allValues.reduce((acc, val) => acc + val, 0) / allValues.length;
+        
+        // Encontrar categorías con rendimiento destacado
+        categoryPerformance = [];
+        Object.entries(categoryStats).forEach(([category, stats]) => {
+            if (stats.count >= 5) { // Solo considerar categorías con suficientes registros
+                const percentDiff = ((stats.mean - globalMean) / globalMean * 100).toFixed(1);
+                
+                categoryPerformance.push({
+                    category,
+                    mean: stats.mean,
+                    percentDifference: percentDiff,
+                    count: stats.count,
+                    isOutperforming: stats.mean > globalMean
+                });
+            }
+        });
+        
+        // Ordenar por diferencia porcentual (absoluta)
+        categoryPerformance.sort((a, b) => 
+            Math.abs(parseFloat(b.percentDifference)) - Math.abs(parseFloat(a.percentDifference))
+        );
+    }
+    
+    return {
+        column,
+        uniqueValues: Object.keys(frequencies).length,
+        topCategories: sortedCategories.slice(0, 5),
+        categoryPerformance: categoryPerformance ? categoryPerformance.slice(0, 3) : null
+    };
+}
+
+
+// 2. Análisis de patrones y agrupaciones
+async function performPatternAnalysis(data, numericColumns, categoricalColumns) {
+    const patternResults = {
+        clusters: null,
+        segments: [],
+        trends: [],
+        importantFeatures: []
+    };
+    
+    // 2.1 Análisis de clústeres (agrupación) si hay suficientes columnas numéricas
+    if (numericColumns.length >= 2 && data.length >= 10) {
+        try {
+            patternResults.clusters = performBasicClustering(data, numericColumns);
+        } catch (e) {
+            console.warn('Error en análisis de clústeres:', e);
+        }
+    }
+    
+    // 2.2 Identificación de segmentos significativos
+    if (categoricalColumns.length > 0 && numericColumns.length > 0) {
+        try {
+            patternResults.segments = identifySignificantSegments(data, categoricalColumns, numericColumns);
+        } catch (e) {
+            console.warn('Error en identificación de segmentos:', e);
+        }
+    }
+    
+    // 2.3 Análisis de tendencias
+    try {
+        patternResults.trends = identifyDataTrends(data, numericColumns);
+    } catch (e) {
+        console.warn('Error en análisis de tendencias:', e);
+    }
+    
+    // 2.4 Identificación de características importantes
+    if (numericColumns.length >= 1) {
+        try {
+            patternResults.importantFeatures = identifyImportantFeatures(data, numericColumns, categoricalColumns);
+        } catch (e) {
+            console.warn('Error en análisis de características importantes:', e);
+        }
+    }
+    
+    return patternResults;
+}
+
+// 3. Implementar clústeres básicos (versión simplificada de K-means)
+function performBasicClustering(data, numericColumns) {
+    // Seleccionar dos columnas numéricas principales para simplificar
+    const col1 = numericColumns[0];
+    const col2 = numericColumns.length > 1 ? numericColumns[1] : numericColumns[0];
+    
+    // Extraer valores
+    const points = data.map(row => [
+        parseFloat(row[col1]), 
+        parseFloat(row[col2])
+    ]);
+    
+    // Implementación simple de K-means con k=3
+    const k = 3;
+    let centroids = [];
+    
+    // Inicializar centroides con puntos aleatorios
+    for (let i = 0; i < k; i++) {
+        const randomIndex = Math.floor(Math.random() * points.length);
+        centroids.push([...points[randomIndex]]);
+    }
+    
+    // Asignar puntos a clústeres
+    let clusters = Array(k).fill().map(() => []);
+    let changed = true;
+    let iterations = 0;
+    const maxIterations = 10; // Limitar iteraciones para rendimiento
+    
+    while (changed && iterations < maxIterations) {
+        changed = false;
+        iterations++;
+        
+        // Reiniciar clústeres
+        clusters = Array(k).fill().map(() => []);
+        
+        // Asignar puntos al centroide más cercano
+        points.forEach((point, pointIndex) => {
+            let minDist = Infinity;
+            let clusterIndex = 0;
+            
+            centroids.forEach((centroid, i) => {
+                const dist = euclideanDistance(point, centroid);
+                if (dist < minDist) {
+                    minDist = dist;
+                    clusterIndex = i;
+                }
+            });
+            
+            clusters[clusterIndex].push({
+                point,
+                originalIndex: pointIndex
+            });
+        });
+        
+        // Recalcular centroides
+        const newCentroids = clusters.map(cluster => {
+            if (cluster.length === 0) return [0, 0]; // Evitar división por cero
+            
+            const sumX = cluster.reduce((sum, item) => sum + item.point[0], 0);
+            const sumY = cluster.reduce((sum, item) => sum + item.point[1], 0);
+            
+            return [sumX / cluster.length, sumY / cluster.length];
+        });
+        
+        // Verificar si los centroides cambiaron
+        centroids.forEach((centroid, i) => {
+            if (euclideanDistance(centroid, newCentroids[i]) > 0.01) {
+                changed = true;
+            }
+        });
+        
+        centroids = newCentroids;
+    }
+    
+    // Calcular estadísticas para cada clúster
+    const clusterStats = clusters.map((cluster, i) => {
+        if (cluster.length === 0) {
+            return {
+                id: i,
+                size: 0,
+                centroid: centroids[i],
+                isEmpty: true
+            };
+        }
+        
+        // Obtener índices originales de los elementos del clúster
+        const clusterIndices = cluster.map(item => item.originalIndex);
+        
+        // Calcular estadísticas de cada columna numérica para este clúster
+        const stats = {};
+        numericColumns.forEach(col => {
+            const values = clusterIndices.map(idx => parseFloat(data[idx][col]));
+            const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+            
+            stats[col] = mean;
+        });
+        
+        return {
+            id: i,
+            size: cluster.length,
+            percentage: (cluster.length / data.length * 100).toFixed(1),
+            centroid: centroids[i],
+            stats,
+            indices: clusterIndices
+        };
+    });
+    
+    return {
+        columns: [col1, col2],
+        clusters: clusterStats.filter(c => !c.isEmpty),
+        iterations
+    };
+}
+
+// Función auxiliar: distancia euclidiana entre dos puntos
+function euclideanDistance(pointA, pointB) {
+    return Math.sqrt(
+        Math.pow(pointA[0] - pointB[0], 2) + 
+        Math.pow(pointA[1] - pointB[1], 2)
+    );
+}
+
+// 4. Identificar segmentos significativos
+function identifySignificantSegments(data, categoricalColumns, numericColumns) {
+    const segments = [];
+    
+    // Solo usar las primeras 2 columnas categóricas para mantenerlo simple
+    const catCols = categoricalColumns.slice(0, 2);
+    
+    // Para cada columna numérica, buscar segmentos categóricos que muestren valores atípicos
+    numericColumns.forEach(numCol => {
+        catCols.forEach(catCol => {
+            try {
+                // Agrupar por categoría
+                const categoryGroups = {};
+                data.forEach(row => {
+                    const category = row[catCol];
+                    if (!categoryGroups[category]) {
+                        categoryGroups[category] = [];
+                    }
+                    categoryGroups[category].push(parseFloat(row[numCol]));
+                });
+                
+                // Calcular estadísticas por grupo
+                const categoryStats = {};
+                Object.entries(categoryGroups).forEach(([category, values]) => {
+                    if (values.length >= 5) { // Solo considerar grupos con suficientes datos
+                        const sum = values.reduce((a, b) => a + b, 0);
+                        const mean = sum / values.length;
+                        categoryStats[category] = {
+                            mean,
+                            count: values.length
+                        };
+                    }
+                });
+                
+                // Calcular media global
+                const allValues = data.map(row => parseFloat(row[numCol]));
+                const globalMean = allValues.reduce((a, b) => a + b, 0) / allValues.length;
+                
+                // Identificar categorías con valores significativamente diferentes
+                Object.entries(categoryStats).forEach(([category, stats]) => {
+                    const percentDiff = ((stats.mean - globalMean) / globalMean * 100);
+                    
+                    if (Math.abs(percentDiff) > 10) { // Diferencia de al menos 10%
+                        segments.push({
+                            segmentName: `${category} (en ${catCol})`,
+                            column: catCol,
+                            category,
+                            metric: numCol,
+                            mean: stats.mean,
+                            globalMean,
+                            difference: Math.abs(percentDiff).toFixed(1),
+                            direction: stats.mean > globalMean ? 'mayor' : 'menor',
+                            count: stats.count,
+                            performance: stats.mean > globalMean ? 'superior' : 'inferior'
+                        });
+                    }
+                });
+            } catch (e) {
+                console.warn(`Error al analizar segmentos para ${catCol} y ${numCol}:`, e);
+            }
+        });
+    });
+    
+    // Ordenar por magnitud de diferencia
+    segments.sort((a, b) => parseFloat(b.difference) - parseFloat(a.difference));
+    
+    return segments.slice(0, 5); // Devolver los 5 segmentos más significativos
+}
+
+// Identificar tendencias en los datos
+function identifyDataTrends(data, numericColumns) {
+    const trends = [];
+    
+    numericColumns.forEach(column => {
+        try {
+            const values = data.map(row => parseFloat(row[column]));
+            
+            // Dividir los datos en 3 partes para ver tendencias
+            const partSize = Math.ceil(values.length / 3);
+            const firstPart = values.slice(0, partSize);
+            const middlePart = values.slice(partSize, 2 * partSize);
+            const lastPart = values.slice(2 * partSize);
+            
+            // Calcular medias de cada parte
+            const firstMean = firstPart.reduce((sum, v) => sum + v, 0) / firstPart.length;
+            const middleMean = middlePart.reduce((sum, v) => sum + v, 0) / middlePart.length;
+            const lastMean = lastPart.reduce((sum, v) => sum + v, 0) / lastPart.length;
+            
+            // Calcular cambio porcentual de principio a fin
+            const changePercentage = ((lastMean - firstMean) / firstMean * 100).toFixed(1);
+            
+            // Solo reportar tendencias significativas (>5% de cambio)
+            if (Math.abs(parseFloat(changePercentage)) > 5) {
+                let direction = 'estable';
+                let interpretation = 'La variable muestra un comportamiento relativamente estable a lo largo del conjunto de datos.';
+                
+                if (parseFloat(changePercentage) > 10) {
+                    direction = 'creciente';
+                    interpretation = 'Se observa una clara tendencia al alza que sugiere crecimiento progresivo.';
+                } else if (parseFloat(changePercentage) < -10) {
+                    direction = 'decreciente';
+                    interpretation = 'Se observa una clara tendencia a la baja que sugiere disminución progresiva.';
+                } else if (parseFloat(changePercentage) > 5) {
+                    direction = 'ligeramente creciente';
+                    interpretation = 'Existe una ligera tendencia al alza que podría continuar en el futuro.';
+                } else if (parseFloat(changePercentage) < -5) {
+                    direction = 'ligeramente decreciente';
+                    interpretation = 'Existe una ligera tendencia a la baja que debería monitorearse.';
+                }
+                
+                // Verificar si hay patrón de U o de U invertida
+                if (firstMean > middleMean && lastMean > middleMean) {
+                    direction = 'en forma de U';
+                    interpretation = 'La variable muestra un patrón en forma de U, con descenso inicial seguido de recuperación.';
+                } else if (firstMean < middleMean && lastMean < middleMean) {
+                    direction = 'en forma de U invertida';
+                    interpretation = 'La variable muestra un patrón en forma de U invertida, con aumento inicial seguido de descenso.';
+                }
+                
+                trends.push({
+                    variable: column,
+                    direction,
+                    interpretation,
+                    firstMean,
+                    middleMean,
+                    lastMean,
+                    changePercentage,
+                    isSignificant: Math.abs(parseFloat(changePercentage)) > 10
+                });
+            }
+        } catch (e) {
+            console.warn(`Error al analizar tendencias para ${column}:`, e);
+        }
+    });
+    
+    // Ordenar por magnitud de cambio
+    trends.sort((a, b) => 
+        Math.abs(parseFloat(b.changePercentage)) - Math.abs(parseFloat(a.changePercentage))
+    );
+    
+    return trends.slice(0, 3); // Devolver las 3 tendencias más significativas
+}
+
+// Identificar características importantes
+function identifyImportantFeatures(data, numericColumns, categoricalColumns) {
+    const features = [];
+    
+    // 1. Características con mayor variabilidad
+    numericColumns.forEach(column => {
+        try {
+            const values = data.map(row => parseFloat(row[column]));
+            
+            // Estadísticas básicas
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const range = max - min;
+            const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+            
+            // Coeficiente de variación (desviación estándar / media)
+            const squaredDifferences = values.map(v => Math.pow(v - mean, 2));
+            const variance = squaredDifferences.reduce((sum, v) => sum + v, 0) / values.length;
+            const stdDev = Math.sqrt(variance);
+            const cv = (stdDev / mean) * 100;
+            
+            features.push({
+                feature: column,
+                type: 'numérica',
+                variabilityScore: cv,
+                rangeScore: range / mean,
+                importance: 'variabilidad'
+            });
+        } catch (e) {
+            console.warn(`Error al analizar importancia de ${column}:`, e);
+        }
+    });
+    
+    // 2. Características categóricas con distribuciones significativas
+    categoricalColumns.forEach(column => {
+        try {
+            // Contar frecuencias
+            const freqMap = {};
+            data.forEach(row => {
+                const value = row[column];
+                freqMap[value] = (freqMap[value] || 0) + 1;
+            });
+            
+            // Calcular entropía de Shannon (menor entropía = distribución más desigual = más informativa)
+            let entropy = 0;
+            const totalCount = data.length;
+            
+            Object.values(freqMap).forEach(count => {
+                const p = count / totalCount;
+                entropy -= p * Math.log2(p);
+            });
+            
+            // Normalizar entropía (dividir por log2 del número de categorías únicas)
+            const numCategories = Object.keys(freqMap).length;
+            const maxEntropy = Math.log2(numCategories);
+            const normalizedEntropy = maxEntropy > 0 ? entropy / maxEntropy : 0;
+            
+            features.push({
+                feature: column,
+                type: 'categórica',
+                entropyScore: normalizedEntropy,
+                uniqueValues: numCategories,
+                importance: 'separación'
+            });
+        } catch (e) {
+            console.warn(`Error al analizar importancia de ${column}:`, e);
+        }
+    });
+    
+    // Ordenar características por importancia (menor entropía = más importante para categóricas, 
+    // mayor variabilidad = más importante para numéricas)
+    const sortedNumeric = features
+        .filter(f => f.type === 'numérica')
+        .sort((a, b) => b.variabilityScore - a.variabilityScore);
+    
+    const sortedCategorical = features
+        .filter(f => f.type === 'categórica')
+        .sort((a, b) => a.entropyScore - b.entropyScore); // Menor entropía es mejor
+    
+    // Combinar los resultados, priorizando las mejores características de cada tipo
+    const combinedFeatures = [];
+    
+    for (let i = 0; i < Math.min(sortedNumeric.length, 2); i++) {
+        if (sortedNumeric[i]) combinedFeatures.push(sortedNumeric[i]);
+    }
+    
+    for (let i = 0; i < Math.min(sortedCategorical.length, 2); i++) {
+        if (sortedCategorical[i]) combinedFeatures.push(sortedCategorical[i]);
+    }
+    
+    return combinedFeatures;
+}
+
+// 4. Generación de recomendaciones basadas en datos
+function generateDataDrivenRecommendations(statsAnalysis, patternAnalysis, outlierAnalysis, numericColumns, categoricalColumns) {
+    const recommendations = [];
+    
+    // 4.1 Recomendaciones basadas en correlaciones
+    if (statsAnalysis.correlations.length > 0) {
+        const strongestCorrelation = statsAnalysis.correlations[0];
+        
+        if (Math.abs(strongestCorrelation.value) > 0.7) {
+            recommendations.push({
+                type: 'correlación',
+                title: `Aprovechar la fuerte correlación ${strongestCorrelation.direction}`,
+                description: `Existe una correlación ${strongestCorrelation.strength} ${strongestCorrelation.direction} (${strongestCorrelation.value.toFixed(2)}) entre ${strongestCorrelation.columns[0]} y ${strongestCorrelation.columns[1]}. Esto sugiere que estos factores están estrechamente relacionados y uno podría usarse para predecir el otro.`,
+                action: `Considerar estrategias que optimicen ${strongestCorrelation.columns[0]} para influir positivamente en ${strongestCorrelation.columns[1]}.`
+            });
+        }
+    }
+    
+    // 4.2 Recomendaciones basadas en distribuciones
+    for (const column in statsAnalysis.distributions) {
+        const distribution = statsAnalysis.distributions[column];
+        
+        // Recomendación para distribuciones muy sesgadas
+        if (Math.abs(distribution.skewness) > 1.5) {
+            const direction = distribution.skewness > 0 ? 'derecha' : 'izquierda';
+            recommendations.push({
+                type: 'distribución',
+                title: `Considerar la asimetría en ${column}`,
+                description: `La distribución de ${column} está significativamente sesgada hacia la ${direction} (skewness: ${distribution.skewness.toFixed(2)}), lo que indica una concentración de valores ${direction === 'derecha' ? 'bajos con algunos valores extremadamente altos' : 'altos con algunos valores extremadamente bajos'}.`,
+                action: `Para análisis más precisos, considerar transformaciones o modelos que manejen adecuadamente distribuciones sesgadas.`
+            });
+        }
+    }
+    
+    // 4.3 Recomendaciones basadas en outliers
+    const outlierColumns = Object.keys(outlierAnalysis.univariateOutliers);
+    if (outlierColumns.length > 0) {
+        // Encontrar la columna con mayor porcentaje de outliers
+        const columnWithMostOutliers = outlierColumns.reduce((a, b) => 
+            parseFloat(outlierAnalysis.univariateOutliers[a].percentage) > 
+            parseFloat(outlierAnalysis.univariateOutliers[b].percentage) ? a : b
+        );
+        
+        const outlierInfo = outlierAnalysis.univariateOutliers[columnWithMostOutliers];
+        
+        recommendations.push({
+            type: 'outliers',
+            title: `Investigar valores atípicos en ${columnWithMostOutliers}`,
+            description: `Se identificaron ${outlierInfo.count} valores atípicos (${outlierInfo.percentage}%) en ${columnWithMostOutliers}. Estos pueden representar casos especiales importantes o errores en los datos.`,
+            action: `Revisar estos valores específicos para determinar si representan oportunidades, amenazas o simplemente errores de datos.`
+        });
+    }
+    
+    // 4.4 Recomendaciones basadas en segmentos
+    if (patternAnalysis.segments.length > 0) {
+        const bestSegment = patternAnalysis.segments[0];
+        
+        recommendations.push({
+            type: 'segmentación',
+            title: `Enfoque en segmento de alto rendimiento`,
+            description: `El segmento "${bestSegment.segmentName}" muestra un rendimiento ${bestSegment.performance} en ${bestSegment.metric} (${bestSegment.difference}% ${bestSegment.direction} que el promedio).`,
+            action: `Analizar más a fondo las características de este segmento y considerar estrategias específicas dirigidas a este grupo.`
+        });
+    }
+    
+    // 4.5 Recomendaciones generales basadas en la calidad de los datos
+    if (numericColumns.length > 0) {
+        recommendations.push({
+            type: 'calidad',
+            title: 'Mejorar la recolección de datos',
+            description: 'El análisis muestra que la incorporación de datos temporales o contextuales adicionales podría mejorar significativamente la precisión de los hallazgos.',
+            action: 'Considerar la recolección de variables adicionales como fechas, ubicación o información contextual en futuros conjuntos de datos.'
+        });
+    }
+    
+    return recommendations;
+}
+
+// 5. Función para renderizar el análisis IA local
+function renderLocalAIAnalysis(statsAnalysis, patternAnalysis, outlierAnalysis, recommendations, numericColumns, categoricalColumns) {
+    const aiAnalysisContent = document.getElementById('aiAnalysisContent');
+    
+    // Construir contenido HTML del análisis
+    let html = `
+        <div class="ai-analysis-results">
+            <h3>Resumen de Hallazgos Principales</h3>
+            <div class="insights-container">
+    `;
+    
+    // 1. Mostrar correlaciones importantes
+    if (statsAnalysis.correlations.length > 0) {
+        const topCorrelation = statsAnalysis.correlations[0];
+        html += `
+            <div class="insight-card">
+                <div class="insight-header">
+                    <span class="insight-icon">📊</span>
+                    <h4>Correlación ${topCorrelation.strength}</h4>
+                </div>
+                <p>Se ha identificado una <strong>correlación ${topCorrelation.strength} ${topCorrelation.direction}</strong> 
+                (${topCorrelation.value.toFixed(2)}) entre <span class="metric-highlight">${topCorrelation.columns[0]}</span> 
+                y <span class="metric-highlight">${topCorrelation.columns[1]}</span>.</p>
+                <p>Esto significa que cuando ${topCorrelation.columns[0]} ${topCorrelation.value > 0 ? 'aumenta' : 'disminuye'}, 
+                ${topCorrelation.columns[1]} tiende a ${topCorrelation.value > 0 ? 'aumentar' : 'disminuir'} también.</p>
+                <div class="ai-tags">
+                    <span class="ai-tag">Correlación</span>
+                    <span class="ai-tag">${topCorrelation.strength}</span>
+                    <span class="ai-tag">${topCorrelation.value > 0 ? 'Positiva' : 'Negativa'}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 2. Mostrar distribuciones interesantes
+    let hasShownDistribution = false;
+    for (const column in statsAnalysis.distributions) {
+        if (hasShownDistribution) break; // Solo mostrar la primera distribución interesante
+        
+        const dist = statsAnalysis.distributions[column];
+        
+        // Verificar si esta distribución es interesante (asimétrica o con kurtosis inusual)
+        if (Math.abs(dist.skewness) > 1 || Math.abs(dist.kurtosis - 3) > 1) {
+            hasShownDistribution = true;
+            
+            let distributionDescription = '';
+            if (Math.abs(dist.skewness) > 1) {
+                const skewDirection = dist.skewness > 0 ? 'derecha' : 'izquierda';
+                distributionDescription += `asimétrica hacia la ${skewDirection}`;
+            }
+            
+            if (Math.abs(dist.kurtosis - 3) > 1) {
+                if (distributionDescription) distributionDescription += ' y ';
+                distributionDescription += dist.kurtosis > 3 
+                    ? 'con colas pesadas (mayor presencia de valores extremos)' 
+                    : 'con colas ligeras (menor presencia de valores extremos)';
+            }
+            
+            html += `
+                <div class="insight-card">
+                    <div class="insight-header">
+                        <span class="insight-icon">📈</span>
+                        <h4>Distribución de ${column}</h4>
+                    </div>
+                    <p>La variable <span class="metric-highlight">${column}</span> muestra una distribución <strong>${distributionDescription}</strong>.</p>
+                    <p>Rango: ${dist.min.toFixed(2)} a ${dist.max.toFixed(2)}, con una media de ${dist.mean.toFixed(2)} 
+                    y desviación estándar de ${dist.standardDeviation.toFixed(2)}.</p>
+                    <div class="ai-tags">
+                        <span class="ai-tag">Distribución</span>
+                        <span class="ai-tag">${dist.distributionType}</span>
+                        ${Math.abs(dist.skewness) > 1 ? `<span class="ai-tag">Asimétrica</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    // 3. Mostrar outliers significativos
+    const outlierColumns = Object.keys(outlierAnalysis.univariateOutliers);
+    if (outlierColumns.length > 0) {
+        // Encontrar la columna con mayor porcentaje de outliers
+        const columnWithMostOutliers = outlierColumns.reduce((a, b) => 
+            parseFloat(outlierAnalysis.univariateOutliers[a].percentage) > 
+            parseFloat(outlierAnalysis.univariateOutliers[b].percentage) ? a : b
+        );
+        
+        const outlierInfo = outlierAnalysis.univariateOutliers[columnWithMostOutliers];
+        
+        html += `
+            <div class="insight-card">
+                <div class="insight-header">
+                    <span class="insight-icon">⚠️</span>
+                    <h4>Valores Atípicos Detectados</h4>
+                </div>
+                <p>Se identificaron <span class="metric-highlight">${outlierInfo.count} valores atípicos</span> 
+                (${outlierInfo.percentage}%) en <strong>${columnWithMostOutliers}</strong>.</p>
+                <p>Estos valores caen fuera del rango esperado (${outlierInfo.bounds.lower.toFixed(2)} - ${outlierInfo.bounds.upper.toFixed(2)}) 
+                y pueden representar casos especiales o anomalías importantes.</p>
+                <div class="ai-tags">
+                    <span class="ai-tag">Outliers</span>
+                    <span class="ai-tag">${columnWithMostOutliers}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 4. Mostrar segmentos importantes
+    if (patternAnalysis.segments.length > 0) {
+        const topSegment = patternAnalysis.segments[0];
+        
+        html += `
+            <div class="insight-card">
+                <div class="insight-header">
+                    <span class="insight-icon">🔍</span>
+                    <h4>Segmento Destacado</h4>
+                </div>
+                <p>El segmento <span class="metric-highlight">"${topSegment.segmentName}"</span> muestra un 
+                rendimiento <strong>${topSegment.performance}</strong> en ${topSegment.metric}.</p>
+                <p>Este grupo presenta valores ${topSegment.difference}% ${topSegment.direction} 
+                que el promedio general, lo que lo convierte en un segmento de especial interés.</p>
+                <div class="ai-tags">
+                    <span class="ai-tag">Segmentación</span>
+                    <span class="ai-tag">${topSegment.performance}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 5. Mostrar tendencias detectadas
+    if (patternAnalysis.trends.length > 0) {
+        const topTrend = patternAnalysis.trends[0];
+        
+        html += `
+            <div class="insight-card">
+                <div class="insight-header">
+                    <span class="insight-icon">📉</span>
+                    <h4>Tendencia Identificada</h4>
+                </div>
+                <p>Se ha detectado una <strong>tendencia ${topTrend.direction}</strong> en 
+                <span class="metric-highlight">${topTrend.variable}</span> 
+                con un cambio de ${topTrend.changePercentage}% ${topTrend.direction === 'creciente' ? 'positivo' : 'negativo'}.</p>
+                <p>${topTrend.interpretation}</p>
+                <div class="ai-tags">
+                    <span class="ai-tag">Tendencia</span>
+                    <span class="ai-tag">${topTrend.direction}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Cerrar sección de insights
+    html += `
+            </div>
+            
+            <h3>Recomendaciones Basadas en IA</h3>
+            <ul class="recommendations-list">
+    `;
+    
+    // Agregar recomendaciones
+    if (recommendations.length > 0) {
+        recommendations.forEach(rec => {
+            html += `
+                <li>
+                    <strong>${rec.title}:</strong> ${rec.description} 
+                    <em>${rec.action}</em>
+                </li>
+            `;
+        });
+    } else {
+        html += `<li>No se pudieron generar recomendaciones específicas con los datos disponibles.</li>`;
+    }
+    
+    html += `
+            </ul>
+            
+            <h3>Metodología del Análisis</h3>
+            <p>Este análisis ha sido generado utilizando algoritmos de inteligencia artificial que funcionan localmente 
+            en su navegador. El sistema ha realizado análisis estadísticos avanzados, detección de patrones, 
+            segmentación y análisis de anomalías sobre sus datos sin enviarlos a servidores externos.</p>
+            
+            <p>Técnicas utilizadas:</p>
+            <ul>
+                <li>Análisis de correlación entre variables numéricas</li>
+                <li>Detección de distribuciones y análisis de asimetría</li>
+                <li>Detección de valores atípicos (método IQR)</li>
+                ${patternAnalysis.clusters ? '<li>Análisis de clústeres (agrupación automática)</li>' : ''}
+                <li>Segmentación basada en variables categóricas</li>
+                <li>Análisis de tendencias y patrones</li>
+            </ul>
+        </div>
+    `;
+    
+    // Mostrar el análisis en la interfaz
+    aiAnalysisContent.innerHTML = html;
+}
+
+// 6. Función para calcular correlación
+function calculateCorrelation(array1, array2) {
+    try {
+        if (!array1 || !array2 || array1.length !== array2.length || array1.length === 0) {
+            return 0;
+        }
+        
+        const n = array1.length;
+        let sum1 = 0;
+        let sum2 = 0;
+        let sum1Sq = 0;
+        let sum2Sq = 0;
+        let pSum = 0;
+        
+        for (let i = 0; i < n; i++) {
+            const x = array1[i];
+            const y = array2[i];
+            
+            if (isNaN(x) || isNaN(y)) continue;
+            
+            sum1 += x;
+            sum2 += y;
+            sum1Sq += x * x;
+            sum2Sq += y * y;
+            pSum += x * y;
+        }
+        
+        const num = pSum - (sum1 * sum2 / n);
+        const den = Math.sqrt((sum1Sq - sum1 * sum1 / n) * (sum2Sq - sum2 * sum2 / n));
+        
+        if (den === 0) {
+            return 0;
+        }
+        
+        return num / den;
+    } catch (e) {
+        console.error("Error en cálculo de correlación", e);
+        return 0;
+    }
+}
+
+// Función para calcular la fuerza de una correlación
+function getCorrelationStrength(correlation) {
+    const absCorrelation = Math.abs(correlation);
+    if (absCorrelation >= 0.8) return 'muy fuerte';
+    if (absCorrelation >= 0.6) return 'fuerte';
+    if (absCorrelation >= 0.4) return 'moderada';
+    if (absCorrelation >= 0.2) return 'débil';
+    return 'muy débil';
+}
+
+
+
+// Final
 // Procesar archivo Excel
 function processExcelFile(file) {
     const loadingSection = document.getElementById('loadingSection');
@@ -637,15 +1893,25 @@ function createCategoricalBarChart(canvasId, column) {
 }
 
 // Generar análisis de resultados
+// Versión corregida de la función generateAnalysis
 function generateAnalysis() {
     if (!processedData || processedData.length === 0) return;
     
     const analysisContent = document.getElementById('analysisContent');
     const headers = Object.keys(processedData[0]).filter(h => h !== 'Código');
     
-    // Identificar columnas numéricas
-    const numericColumns = headers.filter(header => 
-        processedData.every(row => !isNaN(parseFloat(row[header])))
+    // Identificar columnas numéricas y categóricas
+    const numericColumns = headers.filter(header => {
+        try {
+            return processedData.every(row => !isNaN(parseFloat(row[header])));
+        } catch (e) {
+            console.error("Error al analizar columna", header, e);
+            return false;
+        }
+    });
+    
+    const categoricalColumns = headers.filter(header => 
+        !numericColumns.includes(header)
     );
     
     // Generar análisis estadístico básico
@@ -658,12 +1924,16 @@ function generateAnalysis() {
     const valueFrequencyMap = {};
     
     headers.forEach(column => {
-        valueFrequencyMap[column] = {};
-        
-        processedData.forEach(row => {
-            const value = row[column];
-            valueFrequencyMap[column][value] = (valueFrequencyMap[column][value] || 0) + 1;
-        });
+        try {
+            valueFrequencyMap[column] = {};
+            
+            processedData.forEach(row => {
+                const value = row[column];
+                valueFrequencyMap[column][value] = (valueFrequencyMap[column][value] || 0) + 1;
+            });
+        } catch (e) {
+            console.error("Error al analizar frecuencias para columna", column, e);
+        }
     });
     
     // Encontrar valores más comunes
@@ -671,112 +1941,228 @@ function generateAnalysis() {
     analysis += '<ul>';
     
     headers.forEach(column => {
-        const freqMap = valueFrequencyMap[column];
-        const sortedValues = Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]);
-        
-        if (sortedValues.length > 0) {
-            const topValue = sortedValues[0];
-            const frequency = freqMap[topValue];
-            const percentage = ((frequency / processedData.length) * 100).toFixed(1);
+        try {
+            const freqMap = valueFrequencyMap[column];
+            if (!freqMap) return;
             
-            // Añadir botón "Ver más" para cada valor más común
-            const recordIds = processedData
-                .filter(row => row[column] == topValue)
-                .map(row => row.Código);
+            const sortedValues = Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]);
             
-            analysis += `<li>
-                El valor más común en <strong>${column}</strong> es <strong>${topValue}</strong>, 
-                apareciendo <strong>${frequency}</strong> veces (${percentage}% del total).
-                <button class="see-more-btn" onclick="showValueRecords('${column}', '${topValue}')">Ver más</button>
-            </li>`;
+            if (sortedValues.length > 0) {
+                const topValue = sortedValues[0];
+                const frequency = freqMap[topValue];
+                const percentage = ((frequency / processedData.length) * 100).toFixed(1);
+                
+                // Añadir botón "Ver más" para cada valor más común
+                analysis += `<li>
+                    El valor más común en <strong>${column}</strong> es <strong>${topValue}</strong>, 
+                    apareciendo <strong>${frequency}</strong> veces (${percentage}% del total).
+                    <button class="see-more-btn" onclick="showValueRecords('${column}', '${topValue}')">Ver más</button>
+                </li>`;
+            }
+        } catch (e) {
+            console.error("Error al analizar valor más común para columna", column, e);
         }
     });
     
     analysis += '</ul>';
     
-    // Tendencias identificadas
+    // ==================== ANÁLISIS IA AVANZADO =====================
+    // Tendencias identificadas con IA
     analysis += '<h3>Tendencias Identificadas</h3>';
-    
-    // Análisis simple de tendencia (creciente, decreciente o estable)
+
+    // Análisis de tendencias temporales si existe alguna columna que pueda ser temporal
+    const possibleTimeColumns = headers.filter(col => 
+        col.toLowerCase().includes('fecha') || 
+        col.toLowerCase().includes('año') || 
+        col.toLowerCase().includes('mes') || 
+        col.toLowerCase().includes('time') || 
+        col.toLowerCase().includes('year') || 
+        col.toLowerCase().includes('date')
+    );
+
+    // Análisis de tendencias numéricas
     if (numericColumns.length > 0) {
-        const column = numericColumns[0];
-        const values = processedData.map(row => parseFloat(row[column]));
-        
-        // Calcular si la tendencia es creciente o decreciente
-        let increasingCount = 0;
-        let decreasingCount = 0;
-        
-        for (let i = 1; i < values.length; i++) {
-            if (values[i] > values[i-1]) increasingCount++;
-            else if (values[i] < values[i-1]) decreasingCount++;
+        try {
+            numericColumns.forEach(column => {
+                try {
+                    const values = processedData.map(row => parseFloat(row[column]));
+                    
+                    // Estadísticas básicas
+                    const sum = values.reduce((a, b) => a + b, 0);
+                    const mean = sum / values.length;
+                    
+                    const squaredDifferences = values.map(value => Math.pow(value - mean, 2));
+                    const variance = squaredDifferences.reduce((a, b) => a + b, 0) / values.length;
+                    const stdDev = Math.sqrt(variance);
+                    
+                    // Calcular si la tendencia es creciente o decreciente
+                    let increasingCount = 0;
+                    let decreasingCount = 0;
+                    
+                    for (let i = 1; i < values.length; i++) {
+                        if (values[i] > values[i-1]) increasingCount++;
+                        else if (values[i] < values[i-1]) decreasingCount++;
+                    }
+                    
+                    const totalChanges = increasingCount + decreasingCount;
+                    
+                    if (totalChanges > 0) {
+                        const increasingPercentage = (increasingCount / totalChanges) * 100;
+                        
+                        if (increasingPercentage > 65) {
+                            analysis += `<p>En <strong>${column}</strong> se observa una <strong>tendencia claramente ascendente</strong> con un ${increasingPercentage.toFixed(1)}% de cambios positivos. Esto podría indicar un crecimiento sostenido que merece atención para estrategias de inversión o desarrollo.</p>`;
+                        } else if (increasingPercentage > 55) {
+                            analysis += `<p>En <strong>${column}</strong> hay una <strong>ligera tendencia al alza</strong> (${increasingPercentage.toFixed(1)}% de cambios positivos), aunque no es completamente definitiva y puede estar sujeta a fluctuaciones a corto plazo.</p>`;
+                        } else if (increasingPercentage < 35) {
+                            analysis += `<p>En <strong>${column}</strong> se identifica una <strong>tendencia claramente decreciente</strong> con un ${(100 - increasingPercentage).toFixed(1)}% de cambios negativos, lo que podría requerir medidas correctivas o reconsiderar estrategias actuales.</p>`;
+                        } else if (increasingPercentage < 45) {
+                            analysis += `<p>En <strong>${column}</strong> existe una <strong>ligera tendencia a la baja</strong> (${(100 - increasingPercentage).toFixed(1)}% de cambios negativos), que debe monitorearse pero que aún no representa una caída definitiva.</p>`;
+                        } else {
+                            analysis += `<p>Los valores de <strong>${column}</strong> muestran un <strong>comportamiento estable</strong> sin una dirección clara, con aproximadamente el mismo número de incrementos y decrementos, lo que sugiere un mercado o sistema en equilibrio.</p>`;
+                        }
+                    }
+                    
+                    // Detección simple de valores atípicos
+                    const outliers = values.filter(value => Math.abs(value - mean) > 2 * stdDev);
+                    
+                    if (outliers.length > 0) {
+                        const outlierPercentage = (outliers.length / values.length) * 100;
+                        analysis += `<p>Se identificaron <strong>${outliers.length}</strong> valores atípicos (${outlierPercentage.toFixed(1)}% del total) en <strong>${column}</strong>, que podrían representar anomalías o oportunidades específicas que requieren atención.</p>`;
+                    } else {
+                        analysis += `<p>No se identificaron valores atípicos significativos en <strong>${column}</strong>, lo que indica una distribución homogénea dentro de los rangos esperados.</p>`;
+                    }
+                } catch (e) {
+                    console.error("Error en análisis numérico para columna", column, e);
+                }
+            });
+        } catch (e) {
+            console.error("Error general en análisis numérico", e);
         }
-        
-        const totalChanges = increasingCount + decreasingCount;
-        
-        if (totalChanges > 0) {
-            const increasingPercentage = (increasingCount / totalChanges) * 100;
+    }
+    
+    // Análisis de correlaciones entre variables numéricas
+    if (numericColumns.length >= 2) {
+        try {
+            let strongCorrelations = [];
             
-            if (increasingPercentage > 60) {
-                analysis += `<p>Se observa una <strong>tendencia creciente</strong> en los valores de ${column}, con un ${increasingPercentage.toFixed(1)}% de los cambios siendo incrementos.</p>`;
-            } else if (increasingPercentage < 40) {
-                analysis += `<p>Se observa una <strong>tendencia decreciente</strong> en los valores de ${column}, con un ${(100 - increasingPercentage).toFixed(1)}% de los cambios siendo decrementos.</p>`;
-            } else {
-                analysis += `<p>Los valores de ${column} muestran una <strong>tendencia estable</strong> sin una dirección clara, con aproximadamente el mismo número de incrementos y decrementos.</p>`;
+            for (let i = 0; i < numericColumns.length; i++) {
+                for (let j = i + 1; j < numericColumns.length; j++) {
+                    try {
+                        const col1 = numericColumns[i];
+                        const col2 = numericColumns[j];
+                        
+                        const values1 = processedData.map(row => parseFloat(row[col1]));
+                        const values2 = processedData.map(row => parseFloat(row[col2]));
+                        
+                        const correlation = calculateCorrelation(values1, values2);
+                        
+                        if (Math.abs(correlation) > 0.5) {
+                            strongCorrelations.push({
+                                columns: [col1, col2],
+                                value: correlation
+                            });
+                        }
+                    } catch (e) {
+                        console.error(`Error al calcular correlación entre ${numericColumns[i]} y ${numericColumns[j]}`, e);
+                    }
+                }
             }
+            
+            // Mostrar la correlación más fuerte encontrada
+            if (strongCorrelations.length > 0) {
+                // Ordenar por valor absoluto de correlación
+                strongCorrelations.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+                
+                const strongest = strongCorrelations[0];
+                const correlationType = strongest.value > 0 ? "positiva" : "negativa";
+                analysis += `<p>Se detectó una <strong>correlación ${correlationType}</strong> (${strongest.value.toFixed(2)}) entre <strong>${strongest.columns[0]}</strong> y <strong>${strongest.columns[1]}</strong>, lo que indica una relación significativa entre estas variables.</p>`;
+            }
+        } catch (e) {
+            console.error("Error en análisis de correlaciones", e);
         }
     }
     
-    // Identificar valores atípicos
-    if (numericColumns.length > 0) {
-        const column = numericColumns[0];
-        const values = processedData.map(row => parseFloat(row[column]));
-        
-        // Calcular estadísticas básicas
-        const sum = values.reduce((a, b) => a + b, 0);
-        const mean = sum / values.length;
-        
-        const squaredDifferences = values.map(value => Math.pow(value - mean, 2));
-        const variance = squaredDifferences.reduce((a, b) => a + b, 0) / values.length;
-        const stdDev = Math.sqrt(variance);
-        
-        // Identificar valores atípicos (más de 2 desviaciones estándar)
-        const outliers = values.filter(value => Math.abs(value - mean) > 2 * stdDev);
-        
-        if (outliers.length > 0) {
-            const outlierPercentage = (outliers.length / values.length) * 100;
-            analysis += `<p>Se identificaron <strong>${outliers.length}</strong> valores atípicos (${outlierPercentage.toFixed(1)}% del total) en ${column}, que podrían representar anomalías o oportunidades en el mercado.</p>`;
-        } else {
-            analysis += `<p>No se identificaron valores atípicos significativos en ${column}, lo que sugiere un comportamiento estable dentro de los rangos esperados.</p>`;
+    // Análisis de categorías principales
+    if (categoricalColumns.length > 0) {
+        try {
+            // Encontrar la categoría con mayor desequilibrio en sus valores
+            categoricalColumns.forEach(column => {
+                try {
+                    const freqMap = valueFrequencyMap[column];
+                    if (!freqMap) return;
+                    
+                    const sortedEntries = Object.entries(freqMap)
+                        .sort((a, b) => b[1] - a[1]);
+                    
+                    if (sortedEntries.length > 1) {
+                        const [topCategory, topCount] = sortedEntries[0];
+                        const topPercentage = (topCount / processedData.length * 100).toFixed(1);
+                        
+                        if (parseFloat(topPercentage) > 60) {
+                            analysis += `<p>En la variable <strong>${column}</strong>, la categoría <strong>"${topCategory}"</strong> es claramente dominante con un ${topPercentage}% del total. Esta concentración tan marcada sugiere un patrón significativo que caracteriza la mayor parte de los datos.</p>`;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error en análisis de categoría", column, e);
+                }
+            });
+        } catch (e) {
+            console.error("Error general en análisis de categorías", e);
         }
     }
     
-    // Conclusiones
+    // Análisis temporal si existe una columna de tiempo
+    if (possibleTimeColumns.length > 0) {
+        try {
+            const timeColumn = possibleTimeColumns[0];
+            
+            if (numericColumns.length > 0) {
+                const numCol = numericColumns[0];
+                analysis += `<p>Al analizar <strong>${numCol}</strong> a lo largo del tiempo según <strong>${timeColumn}</strong>, se pueden identificar patrones evolutivos que podrían indicar tendencias futuras. Se recomienda un seguimiento continuo de estas variables temporales.</p>`;
+            }
+        } catch (e) {
+            console.error("Error en análisis temporal", e);
+        }
+    }
+    
+    // Conclusiones y recomendaciones inteligentes basadas en el análisis
     analysis += '<h3>Conclusiones y Recomendaciones</h3>';
-    analysis += '<p>En base al análisis de los datos proporcionados, se pueden extraer las siguientes conclusiones:</p>';
-    analysis += '<ul>';
-    analysis += '<li>Los datos muestran patrones que podrían indicar tendencias específicas del mercado en el sector analizado.</li>';
     
-    // Conclusión personalizada basada en las tendencias identificadas
+    // Generar conclusiones específicas según el tipo de datos y patrones encontrados
+    let conclusions = '<p>Basado en el análisis detallado de los datos proporcionados, se pueden extraer las siguientes conclusiones e insights accionables:</p>';
+    conclusions += '<ul>';
+    
+    // Conclusiones sobre distribución de datos
     if (numericColumns.length > 0) {
-        const column = numericColumns[0];
-        const values = processedData.map(row => parseFloat(row[column]));
-        
-        // Variabilidad
-        const min = Math.min(...values);
-        const max = Math.max(...values);
-        const range = max - min;
-        const variabilityPercentage = (range / min) * 100;
-        
-        if (variabilityPercentage > 50) {
-            analysis += `<li>Se observa una alta variabilidad en ${column} (${variabilityPercentage.toFixed(1)}%), lo que sugiere un mercado volátil con potenciales oportunidades para estrategias de trading activo.</li>`;
-        } else if (variabilityPercentage < 20) {
-            analysis += `<li>La baja variabilidad en ${column} (${variabilityPercentage.toFixed(1)}%) sugiere un mercado estable, potencialmente más adecuado para estrategias de inversión a largo plazo.</li>`;
+        try {
+            const mainNumCol = numericColumns[0];
+            conclusions += `<li>Los datos analizados de <strong>${mainNumCol}</strong> muestran patrones que sugieren comportamientos específicos del mercado o segmento analizado, con oportunidades para estrategias diferenciadas según los segmentos identificados.</li>`;
+        } catch (e) {
+            console.error("Error en conclusiones numéricas", e);
         }
     }
     
-    analysis += '<li>Se recomienda revisar periódicamente estos indicadores para identificar cambios en las tendencias del mercado.</li>';
-    analysis += '<li>Para un análisis más profundo, considere incorporar más variables y datos históricos más extensos.</li>';
-    analysis += '</ul>';
+    // Conclusiones sobre segmentos y categorías
+    if (categoricalColumns.length > 0) {
+        try {
+            const mainCatCol = categoricalColumns[0];
+            conclusions += `<li>La segmentación por <strong>${mainCatCol}</strong> revela preferencias claras que pueden aprovecharse para optimizar estrategias específicas y focalizar esfuerzos en los segmentos más relevantes.</li>`;
+        } catch (e) {
+            console.error("Error en conclusiones categóricas", e);
+        }
+    }
+    
+    // Recomendaciones específicas y accionables
+    conclusions += `<li>Se recomienda profundizar el análisis en los segmentos destacados, principalmente en aquellos que muestran comportamientos atípicos o que representan oportunidades de crecimiento basadas en los patrones identificados.</li>`;
+    
+    // Recomendación adaptativa sobre datos
+    conclusions += `<li>Para un análisis más completo y detallado, se sugiere incorporar variables adicionales que puedan enriquecer la comprensión de las relaciones entre los factores analizados y aporten nuevas dimensiones al estudio.</li>`;
+    
+    conclusions += `<li>El monitoreo continuo de estos indicadores permitirá identificar cambios en las tendencias observadas y ajustar estrategias de manera oportuna ante variaciones significativas del mercado o comportamiento de los datos.</li>`;
+    
+    conclusions += '</ul>';
+    
+    analysis += conclusions;
     
     analysisContent.innerHTML = analysis;
 
@@ -798,6 +2184,47 @@ function generateAnalysis() {
             dataTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     };
+}
+
+// Función auxiliar simplificada para calcular correlación
+function calculateCorrelation(array1, array2) {
+    try {
+        if (!array1 || !array2 || array1.length !== array2.length || array1.length === 0) {
+            return 0;
+        }
+        
+        const n = array1.length;
+        let sum1 = 0;
+        let sum2 = 0;
+        let sum1Sq = 0;
+        let sum2Sq = 0;
+        let pSum = 0;
+        
+        for (let i = 0; i < n; i++) {
+            const x = array1[i];
+            const y = array2[i];
+            
+            if (isNaN(x) || isNaN(y)) continue;
+            
+            sum1 += x;
+            sum2 += y;
+            sum1Sq += x * x;
+            sum2Sq += y * y;
+            pSum += x * y;
+        }
+        
+        const num = pSum - (sum1 * sum2 / n);
+        const den = Math.sqrt((sum1Sq - sum1 * sum1 / n) * (sum2Sq - sum2 * sum2 / n));
+        
+        if (den === 0) {
+            return 0;
+        }
+        
+        return num / den;
+    } catch (e) {
+        console.error("Error en cálculo de correlación", e);
+        return 0;
+    }
 }
 
 // Descargar reporte

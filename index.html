@@ -14,6 +14,7 @@
             emailjs.init("HS31_ROk9R6BaeuAI"); // reemplaza con tu User ID
         })();
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
 
 </head>
 <body>
@@ -126,6 +127,18 @@
                 </form>
                 
             </div>
+            <!-- Agregar esta sección después de la sección "analysis-section" en index.html -->
+        <div class="card ai-analysis-section">
+            <h2>Análisis Avanzado con IA</h2>
+            <div class="analysis-options">
+                <button class="btn" id="generateAIAnalysisBtn">Generar Análisis con IA</button>
+                <div class="loading-indicator hidden" id="aiAnalysisLoading">
+                    <div class="spinner"></div>
+                    <p>La IA está analizando tus datos...</p>
+                </div>
+            </div>
+            <div class="ai-analysis-content" id="aiAnalysisContent"></div>
+        </div>
         </div>
     </div>
     
